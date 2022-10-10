@@ -1566,10 +1566,10 @@ void CreateDirectLights(void) {
 
         if (!strcmp(name, "light_spot") || target[0]) {
             dl->type    = emit_spotlight;
-            dl->stopdot = FloatForKey(e, "_cone");
-            if (!dl->stopdot)
-                dl->stopdot = 20;                          // qb: doubled for new calc
-            dl->stopdot = cos(dl->stopdot / 90 * 3.14159); // qb: doubled for new calc
+            dl->spotlight.dot = FloatForKey(e, "_cone");
+            if (!dl->spotlight.dot)
+                dl->spotlight.dot = 20;                          // qb: doubled for new calc
+            dl->spotlight.dot = cos(dl->spotlight.dot / 90 * 3.14159); // qb: doubled for new calc
             if (target[0]) {
                 // point towards target
                 e2 = FindTargetEntity(target);
@@ -1578,22 +1578,22 @@ void CreateDirectLights(void) {
                            (int32_t)dl->origin[0], (int32_t)dl->origin[1], (int32_t)dl->origin[2]);
                 else {
                     GetVectorForKey(e2, "origin", dest);
-                    VectorSubtract(dest, dl->origin, dl->normal);
-                    VectorNormalize(dl->normal, dl->normal);
+                    VectorSubtract(dest, dl->origin, dl->spotlight.normal);
+                    VectorNormalize(dl->spotlight.normal, dl->spotlight.normal);
                 }
             } else {
                 // point down angle
                 angle = FloatForKey(e, "angle");
                 if (angle == ANGLE_UP) {
-                    dl->normal[0] = dl->normal[1] = 0;
-                    dl->normal[2]                 = 1;
+                    dl->spotlight.normal[0] = dl->spotlight.normal[1] = 0;
+                    dl->spotlight.normal[2]                 = 1;
                 } else if (angle == ANGLE_DOWN) {
-                    dl->normal[0] = dl->normal[1] = 0;
-                    dl->normal[2]                 = -1;
+                    dl->spotlight.normal[0] = dl->spotlight.normal[1] = 0;
+                    dl->spotlight.normal[2]                 = -1;
                 } else {
-                    dl->normal[2] = 0;
-                    dl->normal[0] = cos(angle / 180 * 3.14159);
-                    dl->normal[1] = sin(angle / 180 * 3.14159);
+                    dl->spotlight.normal[2] = 0;
+                    dl->spotlight.normal[0] = cos(angle / 180 * 3.14159);
+                    dl->spotlight.normal[1] = sin(angle / 180 * 3.14159);
                 }
             }
         }
@@ -1625,18 +1625,19 @@ void CreateDirectLights(void) {
         dl->next              = directlights[cluster];
         directlights[cluster] = dl;
 
-        VectorCopy(p->plane->normal, dl->normal);
-
         if (sun && p->sky) {
             dl->plane     = p->plane;
             dl->type      = emit_sky;
             // qb: for sky radiosity, was dl->intensity = 1.0f;
             dl->intensity = ColorNormalize(p->totallight, dl->color);
             dl->intensity *= p->area * direct_scale;
+            VectorCopy(p->plane->normal, dl->sky.normal);
         } else {
             dl->type      = emit_surface;
             dl->intensity = ColorNormalize(p->totallight, dl->color);
             dl->intensity *= p->area * direct_scale;
+            VectorCopy(p->plane->normal, dl->surface.normal);
+            dl->surface.winding = p->winding;
         }
 
         VectorClear(p->totallight); // all sent now
@@ -1741,7 +1742,7 @@ static void LightContributionToPoint(directlight_t *l, vec3_t pos, int32_t noden
     if (l->type == emit_sky) {
         // this might be the sun ambient and it might be directional
         set_main = false;
-        dot2     = -DotProduct(delta, l->normal);
+        dot2     = -DotProduct(delta, l->sky.normal);
         if (!*sun_main_once && dot2 > EQUAL_EPSILON) // don't do -extra multisampling on sun
         {
 
@@ -1799,7 +1800,7 @@ static void LightContributionToPoint(directlight_t *l, vec3_t pos, int32_t noden
             break;
 
         case emit_sky: // qb: sky radiosity
-            dot2 = -DotProduct(delta, l->normal);
+            dot2 = -DotProduct(delta, l->sky.normal);
 
             // qb: disable below, nothing is behind light surface of sky
             //    if (dot2 <= EQUAL_EPSILON)
@@ -1818,35 +1819,48 @@ static void LightContributionToPoint(directlight_t *l, vec3_t pos, int32_t noden
             break;
 
         case emit_surface:
-            dot2 = -DotProduct(delta, l->normal);
+            dot = 0;
+            dot2 = 0;
+            dist = 0;
+
+            for(int j = 0; j < l->surface.winding->numpoints; j++) {
+                VectorSubtract(l->origin, pos, delta);
+                dist += VectorNormalize(delta, delta);
+                dot  += DotProduct(delta, normal);
+                dot2 -= DotProduct(delta, l->surface.normal);
+            }
+
             if (dot2 <= EQUAL_EPSILON)
                 return; // behind light surface
 
-            if (!noedgefix) {
-                if (use_qbsp) {    // qb: 4x lightmap res
-                    if (dist > 36) // qb: edge lighting fix- don't drop off right away
-                        scale = (l->intensity / ((dist - 15) * (dist - 15))) * dot * dot2;
-                    else if (dist > 16)
-                        scale = (l->intensity / (dist - 7)) * dot * dot2;
-                    else
-                        scale = l->intensity * dot * dot2;
-                } else {
-                    if (dist > 18) // qb: edge lighting fix- don't drop off right away
-                        scale = (l->intensity / ((dist - 15) * (dist - 15))) * dot * dot2;
-                    else if (dist > 8)
-                        scale = (l->intensity / (dist - 7)) * dot * dot2;
-                    else
-                        scale = l->intensity * dot * dot2;
-                }
+            dot /= (float)l->surface.winding->numpoints;
+            dot2 /= (float)l->surface.winding->numpoints;
+            dist /= (float)l->surface.winding->numpoints;
 
-            } else
-                scale = (l->intensity / (dist * dist)) * dot * dot2;
+            // if (!noedgefix) {
+            //     if (use_qbsp) {    // qb: 4x lightmap res
+            //         if (dist > 36) // qb: edge lighting fix- don't drop off right away
+            //             scale = (l->intensity / ((dist - 15) * (dist - 15))) * dot * dot2;
+            //         else if (dist > 16)
+            //             scale = (l->intensity / (dist - 7)) * dot * dot2;
+            //         else
+            //             scale = l->intensity * dot * dot2;
+            //     } else {
+            //         if (dist > 18) // qb: edge lighting fix- don't drop off right away
+            //             scale = (l->intensity / ((dist - 15) * (dist - 15))) * dot * dot2;
+            //         else if (dist > 8)
+            //             scale = (l->intensity / (dist - 7)) * dot * dot2;
+            //         else
+            //             scale = l->intensity * dot * dot2;
+            //     }
+            // } else
+            scale = (l->intensity / (dist * dist)) * dot * dot2;
             break;
 
         case emit_spotlight:
             // linear falloff
-            dot2 = -DotProduct(delta, l->normal);
-            if (dot2 <= l->stopdot)
+            dot2 = -DotProduct(delta, l->spotlight.normal);
+            if (dot2 <= l->spotlight.dot)
                 return; // outside light cone
             scale = (l->intensity - l->wait * dist) * dot * powf(dot2, 25.0f) * 15;
             // spot center to surface point attenuation

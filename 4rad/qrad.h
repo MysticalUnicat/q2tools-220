@@ -40,6 +40,20 @@ typedef struct directlight_s {
     struct directlight_s *next;
     emittype_t type;
 
+    union {
+        struct {
+            vec3_t normal;
+            winding_t *winding;
+        } surface;
+        struct {
+            vec3_t normal;
+            float dot;
+        } spotlight;
+        struct {
+            vec3_t normal;
+        } sky;
+    };
+
     float intensity;
     int32_t style;
     float wait;
@@ -47,8 +61,8 @@ typedef struct directlight_s {
     int32_t falloff;
     vec3_t origin;
     vec3_t color;
-    vec3_t normal; // for surfaces and spotlights
-    float stopdot; // for spotlights
+    //vec3_t normal; // for surfaces and spotlights
+    //float stopdot; // for spotlights
     dplane_t *plane;
     dleaf_t *leaf;
     dleaf_tx *leafX;
