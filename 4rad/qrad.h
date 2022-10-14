@@ -29,6 +29,85 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 #include <windows.h>
 #endif
 
+struct SH1 {
+  float f[12];
+};
+
+static inline void SH1_Clear(struct SH1 *sh1) { memset(sh1, 0, sizeof(*sh1)); }
+
+static inline struct SH1 SH1_FromDirectionalLight(const float direction[3], const float color[3]) {
+  return (struct SH1){.f[0] = color[0],
+                      .f[1] = direction[0] * color[0],
+                      .f[2] = direction[1] * color[0],
+                      .f[3] = direction[2] * color[0],
+                      .f[4] = color[1],
+                      .f[5] = direction[0] * color[1],
+                      .f[6] = direction[1] * color[1],
+                      .f[7] = direction[2] * color[1],
+                      .f[8] = color[2],
+                      .f[9] = direction[0] * color[2],
+                      .f[10] = direction[1] * color[2],
+                      .f[11] = direction[2] * color[2]};
+}
+
+static inline struct SH1 SH1_Add(const struct SH1 sh1_left, const struct SH1 sh1_right) {
+  return (struct SH1){.f[0] = sh1_left.f[0] + sh1_right.f[0],
+                      .f[1] = sh1_left.f[1] + sh1_right.f[1],
+                      .f[2] = sh1_left.f[2] + sh1_right.f[2],
+                      .f[3] = sh1_left.f[3] + sh1_right.f[3],
+                      .f[4] = sh1_left.f[4] + sh1_right.f[4],
+                      .f[5] = sh1_left.f[5] + sh1_right.f[5],
+                      .f[6] = sh1_left.f[6] + sh1_right.f[6],
+                      .f[7] = sh1_left.f[7] + sh1_right.f[7],
+                      .f[8] = sh1_left.f[8] + sh1_right.f[8],
+                      .f[9] = sh1_left.f[9] + sh1_right.f[9],
+                      .f[10] = sh1_left.f[10] + sh1_right.f[10],
+                      .f[11] = sh1_left.f[11] + sh1_right.f[11]};
+}
+
+static inline struct SH1 SH1_Scale(const struct SH1 sh1, float scale) {
+  return (struct SH1){.f[0] = sh1.f[0] * scale,
+                      .f[1] = sh1.f[1] * scale,
+                      .f[2] = sh1.f[2] * scale,
+                      .f[3] = sh1.f[3] * scale,
+                      .f[4] = sh1.f[4] * scale,
+                      .f[5] = sh1.f[5] * scale,
+                      .f[6] = sh1.f[6] * scale,
+                      .f[7] = sh1.f[7] * scale,
+                      .f[8] = sh1.f[8] * scale,
+                      .f[9] = sh1.f[9] * scale,
+                      .f[10] = sh1.f[10] * scale,
+                      .f[11] = sh1.f[11] * scale};
+}
+
+static inline void SH1_Sample(const struct SH1 sh1, const float direction[3], float output_color[3]) {
+  // https://grahamhazel.com/blog/
+  for(int component = 0; component < 3; component++) {
+    float r0 = sh1.f[component * 4 + 0];
+    float r1[3];
+    r1[0] = sh1.f[component * 4 + 1];
+    r1[1] = sh1.f[component * 4 + 2];
+    r1[2] = sh1.f[component * 4 + 3];
+    float r1_length_sq = r1[0] * r1[0] + r1[1] * r1[1] + r1[2] * r1[2];
+    if(r1_length_sq <= __FLT_EPSILON__ || r0 <= __FLT_EPSILON__) {
+      output_color[component] = 0;
+      continue;
+    }
+    float r1_length = sqrt(r1_length_sq);
+    float one_over_r1_length = 1.0f / r1_length;
+    float r1_normalized[3];
+    r1_normalized[0] = r1[0] * one_over_r1_length;
+    r1_normalized[1] = r1[1] * one_over_r1_length;
+    r1_normalized[2] = r1[2] * one_over_r1_length;
+    float q = 0.5f *
+              (1 + r1_normalized[0] * direction[0] + r1_normalized[1] * direction[1] + r1_normalized[2] * direction[2]);
+    float r1_length_over_r0 = r1_length / r0;
+    float p = 1 + 2 * r1_length_over_r0;
+    float a = (1 - r1_length_over_r0) / (1 + r1_length_over_r0);
+    output_color[component] = r0 * (1 + (1 - a) * (p + 1) * powf(q, p)) * 0.25;
+  }
+}
+
 typedef enum {
     emit_surface,
     emit_point,

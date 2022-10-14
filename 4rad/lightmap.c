@@ -1712,177 +1712,84 @@ re_test:
 LightContributionToPoint
 =============
 */
-static void LightContributionToPoint(directlight_t *l, vec3_t pos, int32_t nodenum,
-                                     vec3_t normal, vec3_t color,
-                                     float lightscale2,
-                                     qboolean *sun_main_once,
-                                     qboolean *sun_ambient_once) {
-    vec3_t delta, target, occluded, colorsky = {0, 0, 0};
-    float dot, dot2;
-    float dist;
-    float scale = 0.0f;
-    float main_val;
-    int32_t i;
-    int32_t lcn;
-    qboolean set_main;
+static struct SH1 LightContributionToPoint(directlight_t *l, vec3_t pos, int32_t nodenum,
+                                           vec3_t normal, // vec3_t color,
+                                           float lightscale2, qboolean *sun_main_once, qboolean *sun_ambient_once) {
+  struct SH1 result;
+  SH1_Clear(&result);
 
-    VectorClear(color);
+  // check for simple occlusion
+  int32_t common_node = lowestCommonNode(nodenum, l->nodenum);
+  if(!noblock && TestLine_r(common_node, pos, l->origin))
+    return result;
 
-    VectorSubtract(l->origin, pos, delta);
-    dist = VectorNormalize(delta, delta);
-    dot  = DotProduct(delta, normal);
+  float total_scale = lightscale2 * 0.25;
+  vec3_t direction, color;
+  float distance, source_dot, scale;
 
-    if ((l->type != emit_sky) && (dot <= EQUAL_EPSILON)) // qb: nothing is behind light surface of sky
-        return;                                          // behind sample surface
+  VectorSubtract(l->origin, pos, direction);
+  if(DotProduct(direction, normal) <= EQUAL_EPSILON) {
+    if(l->type == emit_sky)
+      goto do_sky;
+    return result;
+  }
 
-    lcn = lowestCommonNode(nodenum, l->nodenum);
-    if (!noblock && TestLine_color(lcn, pos, l->origin, occluded))
-        return; // occluded
-
-    if (l->type == emit_sky) {
-        // this might be the sun ambient and it might be directional
-        set_main = false;
-        dot2     = -DotProduct(delta, l->sky.normal);
-        if (!*sun_main_once && dot2 > EQUAL_EPSILON) // don't do -extra multisampling on sun
-        {
-
-            if (!*sun_ambient_once) // Ambient sky, no -extra multisampling
-                scale = sun_ambient;
-            else
-                scale = 0.0f;
-
-            // Main sky
-            dot2 = DotProduct(sun_pos, normal); // sun_pos from target entity
-            if (dot2 > EQUAL_EPSILON)           // Main sky
-            {
-                set_main = true;
-                main_val = sun_main * dot2;
-                if (!noblock) {
-                    if (!RayPlaneIntersect(
-                            l->plane->normal, l->plane->dist, pos, sun_pos, target) ||
-                        TestLine_color(0, pos, target, occluded)) {
-                        set_main = *sun_main_once;
-                        main_val = 0.0f;
-                    } else {
-                        scale += main_val;
-                        main_val = 0.0f; // done with it
-                    }
-                }
-            } else {
-                if (!*sun_ambient_once) {
-                    set_main = false;
-                    main_val = 0.0f;
-                }
-            }
-            if (sun_alt_color) // set in .map
-                VectorScale(sun_color, scale, colorsky);
-            else
-                VectorScale(l->color, scale, colorsky);
-
-            *sun_ambient_once = true;
-            *sun_main_once    = set_main;
-        }
+  switch(l->type) {
+  case emit_surface:
+  case emit_sky: {
+    int hits = 0;
+    for(int j = 0; j < l->surface.winding->numpoints; j++) {
+      VectorSubtract(l->surface.winding->p[j], pos, direction);
+      distance = VectorNormalize(direction, direction);
+      source_dot = -DotProduct(direction, l->surface.normal);
+      if(source_dot <= 0)
+        continue;
+      scale = (l->intensity / (distance * distance)) * source_dot;
+      VectorScale(l->color, scale, color);
+      result = SH1_Add(result, SH1_FromDirectionalLight(direction, color));
+      hits++;
     }
-    // else qb: sky radiosity
-    {
-        switch (l->type) {
-        case emit_point:
-            // linear falloff
-            if (l->falloff == 0)
-                scale = (l->intensity - l->wait * dist) * dot; // qb: wait
-            // [slipyx] additional falloff behavior, from zzsort/blarghrad
-            // inverse
-            else if (l->falloff == 1)
-                scale = l->intensity / dist * dot;
-            // inverse square
-            else
-                scale = l->intensity / (dist * dist) * dot;
-            break;
-
-        case emit_sky: // qb: sky radiosity
-            dot2 = -DotProduct(delta, l->sky.normal);
-
-            // qb: disable below, nothing is behind light surface of sky
-            //    if (dot2 <= EQUAL_EPSILON)
-            //        return;	// behind light surface
-            if (!noedgefix) {
-                if (dist > 36) // qb: edge lighting fix- don't drop off right away
-                    scale = (l->intensity / ((dist - 30) * (dist - 30))) * dot * dot2;
-                else if (dist > 16)
-                    scale = (l->intensity / (dist - 15)) * dot * dot2;
-                else
-                    scale = l->intensity * dot * dot2;
-            } else
-                scale = (l->intensity / (dist * dist)) * dot * dot2;
-
-            scale *= sunradscale; // qb: adjust scale when sun is active
-            break;
-
-        case emit_surface:
-            dot = 0;
-            dot2 = 0;
-            dist = 0;
-
-            for(int j = 0; j < l->surface.winding->numpoints; j++) {
-                VectorSubtract(l->origin, pos, delta);
-                dist += VectorNormalize(delta, delta);
-                dot  += DotProduct(delta, normal);
-                dot2 -= DotProduct(delta, l->surface.normal);
-            }
-
-            if (dot2 <= EQUAL_EPSILON)
-                return; // behind light surface
-
-            dot /= (float)l->surface.winding->numpoints;
-            dot2 /= (float)l->surface.winding->numpoints;
-            dist /= (float)l->surface.winding->numpoints;
-
-            // if (!noedgefix) {
-            //     if (use_qbsp) {    // qb: 4x lightmap res
-            //         if (dist > 36) // qb: edge lighting fix- don't drop off right away
-            //             scale = (l->intensity / ((dist - 15) * (dist - 15))) * dot * dot2;
-            //         else if (dist > 16)
-            //             scale = (l->intensity / (dist - 7)) * dot * dot2;
-            //         else
-            //             scale = l->intensity * dot * dot2;
-            //     } else {
-            //         if (dist > 18) // qb: edge lighting fix- don't drop off right away
-            //             scale = (l->intensity / ((dist - 15) * (dist - 15))) * dot * dot2;
-            //         else if (dist > 8)
-            //             scale = (l->intensity / (dist - 7)) * dot * dot2;
-            //         else
-            //             scale = l->intensity * dot * dot2;
-            //     }
-            // } else
-            scale = (l->intensity / (dist * dist)) * dot * dot2;
-            break;
-
-        case emit_spotlight:
-            // linear falloff
-            dot2 = -DotProduct(delta, l->spotlight.normal);
-            if (dot2 <= l->spotlight.dot)
-                return; // outside light cone
-            scale = (l->intensity - l->wait * dist) * dot * powf(dot2, 25.0f) * 15;
-            // spot center to surface point attenuation
-            // dot2 range is limited, so exponent is big.
-            // this term is not really necessary, could have spots with sharp cutoff
-            // and for fuzzy edges use multiple lights with different cones.
-            break;
-
-        default:
-            Error("Bad l->type");
-        }
+    if(hits == 0)
+      return result;
+    result = SH1_Scale(result, 1.0f / (float)hits);
+    if(l->type == emit_sky) {
+      result = SH1_Scale(result, total_scale);
+      goto do_sky;
     }
-
-    if (scale > 0.0f) {
-        scale *= lightscale2;                       // adjust for multisamples, -extra cmd line arg
-        VectorScale(l->color, scale * 0.25, color); // qb: scale hack for intensity similar to original 4rad
-    }
-
-    for (i = 0; i < 3; i++) {
-        color[i] += colorsky[i];
-        color[i] *= occluded[i];
-    }
+    break;
+  }
+  case emit_point: {
+    distance = VectorNormalize(direction, direction);
+    scale = l->falloff == 0 ? (l->intensity - l->wait * distance)
+          : l->falloff == 1 ? (l->intensity / distance)
+          :                   (l->intensity / (distance * distance))
+          ;
+    if(scale < 0)
+      return result;
+    VectorScale(l->color, scale, color);
+    result = SH1_FromDirectionalLight(direction, color);
+    break;
+  }
+  case emit_spotlight: {
+    distance = VectorNormalize(direction, direction);
+    source_dot = -DotProduct(direction, l->spotlight.normal);
+    if(source_dot <= l->spotlight.dot)
+      return result;
+    scale = (l->intensity - l->wait * distance) * powf(source_dot, 25) * 15;
+    VectorScale(l->color, scale, color);
+    result = SH1_FromDirectionalLight(direction, color);
+    break;
+  }
+  }
+  return SH1_Scale(result, total_scale);
+do_sky:
+  if(!*sun_ambient_once) {
+    // TODO
+  }
+  if(!*sun_main_once) {
+    // TODO
+  }
+  return result;
 }
 
 /*
@@ -1892,47 +1799,56 @@ GatherSampleLight
 Lightscale2 is the normalizer for multisampling, -extra cmd line arg
 =============
 */
+void GatherSampleLight(vec3_t pos, vec3_t normal, float **styletable, int32_t offset, int32_t mapsize,
+                       float lightscale2, qboolean *sun_main_once, qboolean *sun_ambient_once, byte *pvs) {
+  int32_t i;
+  directlight_t *l;
+  float *dest;
+  int32_t nodenum;
+  struct SH1 colors[MAX_LSTYLES];
 
-void GatherSampleLight(vec3_t pos, vec3_t normal,
-                       float **styletable, int32_t offset, int32_t mapsize, float lightscale2,
-                       qboolean *sun_main_once, qboolean *sun_ambient_once, byte *pvs) {
-    int32_t i;
-    directlight_t *l;
-    float *dest;
+  memset(colors, 0, sizeof(colors));
+
+  // get the PVS for the pos to limit the number of checks
+  if(!PvsForOrigin(pos, pvs)) {
+    return;
+  }
+  nodenum = PointInNodenum(pos);
+
+  for(i = 0; i < dvis->numclusters; i++) {
+    if(!(pvs[i >> 3] & (1 << (i & 7))))
+      continue;
+
+    for(l = directlights[i]; l; l = l->next) {
+      struct SH1 sh1 =
+          LightContributionToPoint(l, pos, nodenum, normal, /* color, */ lightscale2, sun_main_once, sun_ambient_once);
+      colors[l->style] = SH1_Add(colors[l->style], sh1);
+    }
+  }
+
+  for(i = 0; i < MAX_LSTYLES; i++) {
     vec3_t color;
-    int32_t nodenum;
 
-    // get the PVS for the pos to limit the number of checks
-    if (!PvsForOrigin(pos, pvs)) {
-        return;
+    SH1_Sample(colors[i], normal, color);
+
+    // no contribution
+    if(VectorCompare(color, vec3_origin))
+      continue;
+
+    // if this style doesn't have a table yet, allocate one
+    if(!styletable[i]) {
+      styletable[i] = malloc(mapsize);
+      memset(styletable[i], 0, mapsize);
     }
-    nodenum = PointInNodenum(pos);
 
-    for (i = 0; i < dvis->numclusters; i++) {
-        if (!(pvs[i >> 3] & (1 << (i & 7))))
-            continue;
-
-        for (l = directlights[i]; l; l = l->next) {
-            LightContributionToPoint(l, pos, nodenum, normal, color, lightscale2,
-                                     sun_main_once, sun_ambient_once);
-
-            // no contribution
-            if (VectorCompare(color, vec3_origin))
-                continue;
-
-            // if this style doesn't have a table yet, allocate one
-            if (!styletable[l->style]) {
-                styletable[l->style] = malloc(mapsize);
-                memset(styletable[l->style], 0, mapsize);
-            }
-
-            dest = styletable[l->style] + offset;
-            dest[0] += color[0];
-            dest[1] += color[1];
-            dest[2] += color[2];
-        }
-    }
+    dest = styletable[i] + offset;
+    dest[0] += color[0];
+    dest[1] += color[1];
+    dest[2] += color[2];
+  }
 }
+
+
 
 /*
 =============
