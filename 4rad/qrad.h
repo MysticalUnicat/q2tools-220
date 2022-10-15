@@ -95,6 +95,25 @@ static inline struct SH1 SH1_ColorScale(const struct SH1 sh1, const float scale[
                       .f[11] = sh1.f[11] * scale[2]};
 }
 
+static inline struct SH1 SH1_Reflect(const struct SH1 sh1, const float normal[3]) {
+  float rd = 2*(sh1.f[1]*normal[0] + sh1.f[2]*normal[1] + sh1.f[3]*normal[2]);
+  float gd = 2*(sh1.f[5]*normal[0] + sh1.f[6]*normal[1] + sh1.f[7]*normal[2]);
+  float bd = 2*(sh1.f[9]*normal[0] + sh1.f[10]*normal[1] + sh1.f[11]*normal[2]);
+
+  return (struct SH1){.f[0] = sh1.f[0],
+                      .f[1] = sh1.f[1] - rd*normal[0],
+                      .f[2] = sh1.f[2] - rd*normal[1],
+                      .f[3] = sh1.f[3] - rd*normal[2],
+                      .f[4] = sh1.f[4],
+                      .f[5] = sh1.f[5] - gd*normal[0],
+                      .f[6] = sh1.f[6] - gd*normal[1],
+                      .f[7] = sh1.f[7] - gd*normal[2],
+                      .f[8] = sh1.f[8],
+                      .f[9] = sh1.f[9] - bd*normal[0],
+                      .f[10] = sh1.f[10] - bd*normal[1],
+                      .f[11] = sh1.f[11] - bd*normal[2]};
+}
+
 static inline void SH1_Sample(const struct SH1 sh1, const float direction[3], float output_color[3]) {
   // https://grahamhazel.com/blog/
   for(int component = 0; component < 3; component++) {

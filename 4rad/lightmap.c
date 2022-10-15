@@ -1551,6 +1551,7 @@ void CreateDirectLights(void) {
             intensity = FloatForKey(e, "_light");
         if (!intensity)
             intensity = 300;
+        intensity *= 500;
 
         _color = ValueForKey(e, "_color");
         if (_color && _color[0]) {
@@ -1639,6 +1640,8 @@ void CreateDirectLights(void) {
             VectorCopy(p->plane->normal, dl->surface.normal);
             dl->surface.winding = p->winding;
         }
+
+        dl->intensity *= 500;
 
         VectorClear(p->totallight); // all sent now
     }
@@ -2475,7 +2478,8 @@ void FinalLightFace(int32_t facenum) {
             f->styles[st] = fl->stylenums[st];
 
             for (j = 0; j < fl->numsamples; j++) {
-                SH1_Sample(fl->samples[st][j], f->side ? backplanes[f->planenum].normal : dplanes[f->planenum].normal, lb);
+                VectorClear(lb);
+                //SH1_Sample(fl->samples[st][j], f->side ? backplanes[f->planenum].normal : dplanes[f->planenum].normal, lb);
 
                 if (numbounce > 0 && st == 0) {
                     vec3_t add;

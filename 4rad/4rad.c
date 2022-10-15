@@ -36,7 +36,7 @@ unsigned num_patches;
 int32_t num_smoothing; // qb: number of phong hits
 
 vec3_t radiosity[MAX_PATCHES_QBSP];    // light leaving a patch
-vec3_t illumination[MAX_PATCHES_QBSP]; // light arriving at a patch
+struct SH1 illumination[MAX_PATCHES_QBSP]; // light arriving at a patch
 
 vec3_t face_offset[MAX_MAP_FACES_QBSP]; // for rotating bmodels
 dplane_t backplanes[MAX_MAP_PLANES_QBSP];
@@ -504,12 +504,13 @@ void MakeTransfers(int32_t i) {
         }
 
         // relative angles
-        scale = DotProduct(delta, plane.normal);
-        scale *= -DotProduct(delta, patch2->plane->normal);
-        if (scale <= 0)
+        float leaving_dot = DotProduct(delta, plane.normal);
+        float incoming_dot = -DotProduct(delta, patch2->plane->normal);
+        if (leaving_dot * incoming_dot <= 0)
             continue;
 
         // check exact transfer
+        scale = leaving_dot;
         trans = scale * patch2->area * inv_dist * inv_dist;
 
         if (trans > patch_cutoff) {
@@ -652,18 +653,24 @@ float CollectLight(void) {
         // skys never collect light, it is just dropped
         if (patch->sky) {
             VectorClear(radiosity[i]);
-            VectorClear(illumination[i]);
             continue;
         }
 
+        vec3_t normal;
+        VectorCopy(patch->plane->normal, normal);
+
+        struct SH1 illum = SH1_Reflect(illumination[i], normal);
+
         for (j = 0; j < 3; j++) {
-            patch->totallight[j] += illumination[i][j] / patch->area;
-            radiosity[i][j] = illumination[i][j] * patch->reflectivity[j];
+            patch->totallight[j] += illum.f[j * 4] / patch->area;
         }
 
+        SH1_Sample(SH1_ColorScale(illum, patch->reflectivity), normal, radiosity[i]);
+
         total += radiosity[i][0] + radiosity[i][1] + radiosity[i][2];
-        VectorClear(illumination[i]);
     }
+
+    memset(illumination, 0, sizeof(illumination[0]) * num_patches);
 
     return total;
 }
@@ -706,8 +713,12 @@ void ShootLight(int32_t patchnum) {
     num   = patch->numtransfers;
 
     for (k = 0; k < num; k++, trans++) {
-        for (l = 0; l < 3; l++)
-            illumination[trans->patch][l] += send[l] * trans->transfer;
+        vec3_t direction;
+        VectorSubtract(patches[trans->patch].origin, patch->origin, direction);
+        VectorNormalize(direction, direction);
+        illumination[trans->patch] = SH1_Add(illumination[trans->patch], SH1_FromDirectionalLight(direction, send));
+        // for (l = 0; l < 3; l++)
+        //     illumination[trans->patch][l] += send[l] * trans->transfer;
     }
     if (memory) {
         free(patches[patchnum].transfers);
