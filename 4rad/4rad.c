@@ -31,7 +31,7 @@ every surface must be divided into at least two patches each axis
 
 patch_t * face_patches[MAX_MAP_FACES_QBSP];
 entity_t * face_entity[MAX_MAP_FACES_QBSP];
-patch_t patches[MAX_PATCHES_QBSP];
+patch_t * patches;//[MAX_PATCHES_QBSP];
 unsigned num_patches;
 int32_t num_smoothing; // qb: number of phong hits
 
@@ -728,11 +728,13 @@ void BounceLight(void) {
 
     for (i = 0; i < num_patches; i++) {
         p = &patches[i];
-        for (j = 0; j < 3; j++) {
+        // for (j = 0; j < 3; j++) {
             //			p->totallight[j] = p->samplelight[j];
-            radiosity[i][j] = p->samplelight[j] * p->reflectivity[j] * p->area;
-        }
+            // radiosity[i][j] = p->samplelight[j] * p->reflectivity[j] * p->area;
+        // }
+        SH1_Sample(SH1_Scale(SH1_ColorScale(p->samplelight, p->reflectivity), p->area), p->plane->normal, radiosity[i]);
     }
+
     if (memory)
         trace_buf_size = (num_patches + 7) / 8;
 
@@ -842,6 +844,8 @@ void RAD_ProcessArgument(const char * arg) {
     char * tbasedir = "";
     char * tmoddir = "";
 
+    patches = malloc(sizeof(*patches) * MAX_PATCHES_QBSP);
+
     start = I_FloatTime();
 
     strcpy(source, ExpandArg(arg));
@@ -884,4 +888,7 @@ void RAD_ProcessArgument(const char * arg) {
 
     PrintBSPFileSizes();
     printf("<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< END 4rad >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>\n\n");
+
+    free(patches);
+    patches = NULL;
 }

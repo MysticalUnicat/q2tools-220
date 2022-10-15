@@ -80,6 +80,21 @@ static inline struct SH1 SH1_Scale(const struct SH1 sh1, float scale) {
                       .f[11] = sh1.f[11] * scale};
 }
 
+static inline struct SH1 SH1_ColorScale(const struct SH1 sh1, const float scale[3]) {
+  return (struct SH1){.f[0] = sh1.f[0] * scale[0],
+                      .f[1] = sh1.f[1] * scale[0],
+                      .f[2] = sh1.f[2] * scale[0],
+                      .f[3] = sh1.f[3] * scale[0],
+                      .f[4] = sh1.f[4] * scale[1],
+                      .f[5] = sh1.f[5] * scale[1],
+                      .f[6] = sh1.f[6] * scale[1],
+                      .f[7] = sh1.f[7] * scale[1],
+                      .f[8] = sh1.f[8] * scale[2],
+                      .f[9] = sh1.f[9] * scale[2],
+                      .f[10] = sh1.f[10] * scale[2],
+                      .f[11] = sh1.f[11] * scale[2]};
+}
+
 static inline void SH1_Sample(const struct SH1 sh1, const float direction[3], float output_color[3]) {
   // https://grahamhazel.com/blog/
   for(int component = 0; component < 3; component++) {
@@ -193,14 +208,14 @@ typedef struct patch_s {
 
     // each style 0 lightmap sample in the patch will be
     // added up to get the average illuminance of the entire patch
-    vec3_t samplelight;
+    struct SH1 samplelight;
     int32_t samples; // for averaging direct light
 } patch_t;
 
 extern patch_t *face_patches[MAX_MAP_FACES_QBSP];
 extern entity_t *face_entity[MAX_MAP_FACES_QBSP];
 extern vec3_t face_offset[MAX_MAP_FACES_QBSP]; // for rotating bmodels
-extern patch_t patches[MAX_PATCHES_QBSP];
+extern patch_t * patches;//[MAX_PATCHES_QBSP];
 extern unsigned num_patches;
 
 extern int32_t leafparents[MAX_MAP_LEAFS_QBSP];

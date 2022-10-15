@@ -1864,12 +1864,6 @@ void AddSampleToPatch(vec3_t pos, struct SH1 sh1, int32_t facenum) {
     if (numbounce == 0)
         return;
 
-    vec3_t color;
-    SH1_Sample(sh1, dfaces[facenum].side ? backplanes[dfaces[facenum].planenum].normal : dplanes[dfaces[facenum].planenum].normal, color);
-
-    if (color[0] + color[1] + color[2] < 1.0) // qb: was 3
-        return;
-
     for (patch = face_patches[facenum]; patch; patch = patch->next) {
         // see if the point is in this patch (roughly)
         WindingBounds(patch->winding, mins, maxs);
@@ -1882,7 +1876,7 @@ void AddSampleToPatch(vec3_t pos, struct SH1 sh1, int32_t facenum) {
 
         // add the sample to the patch
         patch->samples++;
-        VectorAdd(patch->samplelight, color, patch->samplelight);
+        patch->samplelight = SH1_Add(patch->samplelight, sh1);
     nextpatch:;
     }
 }
@@ -2220,7 +2214,7 @@ void BuildFacelights(int32_t facenum) {
     // average up the direct light on each patch for radiosity
     for (patch = face_patches[facenum]; patch; patch = patch->next) {
         if (patch->samples) {
-            VectorScale(patch->samplelight, 1.0 / patch->samples, patch->samplelight);
+            patch->samplelight = SH1_Scale(patch->samplelight, 1.0f / patch->samples);
         }
     }
 
