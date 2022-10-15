@@ -35,7 +35,7 @@ patch_t * patches;//[MAX_PATCHES_QBSP];
 unsigned num_patches;
 int32_t num_smoothing; // qb: number of phong hits
 
-vec3_t radiosity[MAX_PATCHES_QBSP];    // light leaving a patch
+struct SH1 radiosity[MAX_PATCHES_QBSP];    // light leaving a patch
 struct SH1 illumination[MAX_PATCHES_QBSP]; // light arriving at a patch
 
 vec3_t face_offset[MAX_MAP_FACES_QBSP]; // for rotating bmodels
@@ -652,7 +652,7 @@ float CollectLight(void) {
     for (i = 0, patch = patches; i < num_patches; i++, patch++) {
         // skys never collect light, it is just dropped
         if (patch->sky) {
-            VectorClear(radiosity[i]);
+            radiosity[i] = SH1_Clear();
             continue;
         }
 
@@ -665,9 +665,9 @@ float CollectLight(void) {
             patch->totallight[j] += illum.f[j * 4] / patch->area;
         }
 
-        SH1_Sample(SH1_ColorScale(illum, patch->reflectivity), normal, radiosity[i]);
+        radiosity[i] = SH1_ColorScale(illum, patch->reflectivity);
 
-        total += radiosity[i][0] + radiosity[i][1] + radiosity[i][2];
+        total += radiosity[i].f[0] + radiosity[i].f[4] + radiosity[i].f[8];
     }
 
     memset(illumination, 0, sizeof(illumination[0]) * num_patches);
@@ -690,13 +690,13 @@ void ShootLight(int32_t patchnum) {
     transfer_t *trans;
     int32_t num;
     patch_t *patch;
-    vec3_t send;
+    // vec3_t send;
 
     // this is the amount of light we are distributing
     // prescale it so that multiplying by the 16 bit
     // transfer values gives a proper output value
-    for (k = 0; k < 3; k++)
-        send[k] = radiosity[patchnum][k] / 0x10000;
+    struct SH1 send = SH1_Scale(radiosity[patchnum], 1.0f / 0x10000);
+
     patch = &patches[patchnum];
     if (memory) {
         c_progress = 10 * patchnum / num_patches;
@@ -713,10 +713,11 @@ void ShootLight(int32_t patchnum) {
     num   = patch->numtransfers;
 
     for (k = 0; k < num; k++, trans++) {
-        vec3_t direction;
+        vec3_t direction, color;
         VectorSubtract(patches[trans->patch].origin, patch->origin, direction);
         VectorNormalize(direction, direction);
-        illumination[trans->patch] = SH1_Add(illumination[trans->patch], SH1_FromDirectionalLight(direction, send));
+        SH1_Sample(send, direction, color);
+        illumination[trans->patch] = SH1_Add(illumination[trans->patch], SH1_FromDirectionalLight(direction, color));
         // for (l = 0; l < 3; l++)
         //     illumination[trans->patch][l] += send[l] * trans->transfer;
     }
@@ -743,7 +744,7 @@ void BounceLight(void) {
             //			p->totallight[j] = p->samplelight[j];
             // radiosity[i][j] = p->samplelight[j] * p->reflectivity[j] * p->area;
         // }
-        SH1_Sample(SH1_Scale(SH1_ColorScale(p->samplelight, p->reflectivity), p->area), p->plane->normal, radiosity[i]);
+        radiosity[i] = SH1_Scale(SH1_ColorScale(p->samplelight, p->reflectivity), p->area);
     }
 
     if (memory)
