@@ -33,7 +33,7 @@ struct SH1 {
   float f[12];
 };
 
-static inline void SH1_Clear(struct SH1 *sh1) { memset(sh1, 0, sizeof(*sh1)); }
+static inline struct SH1 SH1_Clear(void) { return (struct SH1){{0,0,0,0,0,0,0,0,0,0,0,0}}; }
 
 static inline struct SH1 SH1_FromDirectionalLight(const float direction[3], const float color[3]) {
   return (struct SH1){.f[0] = color[0],
@@ -223,7 +223,7 @@ typedef struct patch_s {
 
     // illuminance * reflectivity = radiosity
     vec3_t reflectivity;
-    vec3_t baselight; // emissivity only
+    struct SH1 baselight; // emissivity only
 
     // each style 0 lightmap sample in the patch will be
     // added up to get the average illuminance of the entire patch

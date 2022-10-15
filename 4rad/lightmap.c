@@ -1551,7 +1551,6 @@ void CreateDirectLights(void) {
             intensity = FloatForKey(e, "_light");
         if (!intensity)
             intensity = 300;
-        intensity *= 500;
 
         _color = ValueForKey(e, "_color");
         if (_color && _color[0]) {
@@ -1641,8 +1640,6 @@ void CreateDirectLights(void) {
             dl->surface.winding = p->winding;
         }
 
-        dl->intensity *= 500;
-
         VectorClear(p->totallight); // all sent now
     }
 
@@ -1718,8 +1715,7 @@ LightContributionToPoint
 static struct SH1 LightContributionToPoint(directlight_t *l, vec3_t pos, int32_t nodenum,
                                            vec3_t normal, // vec3_t color,
                                            float lightscale2, qboolean *sun_main_once, qboolean *sun_ambient_once) {
-  struct SH1 result;
-  SH1_Clear(&result);
+  struct SH1 result = SH1_Clear();
 
   // check for simple occlusion
   int32_t common_node = lowestCommonNode(nodenum, l->nodenum);
@@ -2233,13 +2229,11 @@ void BuildFacelights(int32_t facenum) {
 
     // the light from DIRECT_LIGHTS is sent out, but the
     // texture itself should still be full bright
-    if (face_patches[facenum]->baselight[0] >= DIRECT_LIGHT ||
-        face_patches[facenum]->baselight[1] >= DIRECT_LIGHT ||
-        face_patches[facenum]->baselight[2] >= DIRECT_LIGHT) {
+    if (face_patches[facenum]->baselight.f[0] >= DIRECT_LIGHT ||
+        face_patches[facenum]->baselight.f[4] >= DIRECT_LIGHT ||
+        face_patches[facenum]->baselight.f[8] >= DIRECT_LIGHT) {
         for (i = 0; i < liteinfo[0].numsurfpt; i++) {
-            fl->samples[0][i].f[0] += face_patches[facenum]->baselight[0];
-            fl->samples[0][i].f[4] += face_patches[facenum]->baselight[1];
-            fl->samples[0][i].f[8] += face_patches[facenum]->baselight[2];
+            fl->samples[0][i] = SH1_Add(fl->samples[0][i], face_patches[facenum]->baselight);
         }
     }
 
@@ -2478,8 +2472,8 @@ void FinalLightFace(int32_t facenum) {
             f->styles[st] = fl->stylenums[st];
 
             for (j = 0; j < fl->numsamples; j++) {
-                VectorClear(lb);
-                //SH1_Sample(fl->samples[st][j], f->side ? backplanes[f->planenum].normal : dplanes[f->planenum].normal, lb);
+                // VectorClear(lb);
+                SH1_Sample(fl->samples[st][j], f->side ? backplanes[f->planenum].normal : dplanes[f->planenum].normal, lb);
 
                 if (numbounce > 0 && st == 0) {
                     vec3_t add;

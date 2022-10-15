@@ -316,7 +316,7 @@ winding_t *WindingFromFace(dface_t *f) {
 BaseLightForFace
 =============
 */
-void BaseLightForFaceX(dface_tx *f, vec3_t color) {
+struct SH1 BaseLightForFaceX(dface_tx *f) {
     texinfo_t *tx;
 
     //
@@ -327,13 +327,18 @@ void BaseLightForFaceX(dface_tx *f, vec3_t color) {
         if (tx->flags & SURF_LIGHT) {
             printf("Surface light has 0 intensity.\n");
         }
-        VectorClear(color);
-        return;
+        return SH1_Clear();
     }
+
+    // non-standard use, get a more diffuse baselight from short direction vector
+    vec3_t normal, color;
+    VectorScale((f->side ? backplanes[f->planenum].normal : dplanes[f->planenum].normal), 0.25, normal);
     VectorScale(texture_reflectivity[f->texinfo], tx->value, color);
+
+    return SH1_FromDirectionalLight(normal, color);
 }
 
-void BaseLightForFaceI(dface_t *f, vec3_t color) {
+struct SH1 BaseLightForFaceI(dface_t *f) {
     texinfo_t *tx;
 
     //
@@ -344,10 +349,15 @@ void BaseLightForFaceI(dface_t *f, vec3_t color) {
         if (tx->flags & SURF_LIGHT) {
             printf("Surface light has 0 intensity.\n");
         }
-        VectorClear(color);
-        return;
+        return SH1_Clear();
     }
+
+    // non-standard use, get a more diffuse baselight from short direction vector
+    vec3_t normal, color;
+    VectorScale(f->side ? backplanes[f->planenum].normal : dplanes[f->planenum].normal, 0.25, normal);
     VectorScale(texture_reflectivity[f->texinfo], tx->value, color);
+
+    return SH1_FromDirectionalLight(normal, color);
 }
 
 qboolean IsSkyX(dface_tx *f) {
@@ -440,14 +450,14 @@ void MakePatchForFace(int32_t fn, winding_t *w) {
 
         // non-bmodel patches can emit light
         if (fn < dmodels[0].numfaces) {
-            BaseLightForFaceX(f, patch->baselight);
-
             ColorNormalize(patch->reflectivity, color);
 
-            for (i = 0; i < 3; i++)
-                patch->baselight[i] *= color[i];
+            patch->baselight = SH1_ColorScale(BaseLightForFaceX(f), color);
 
-            VectorCopy(patch->baselight, patch->totallight);
+            // VectorCopy(patch->baselight, patch->totallight);
+            patch->totallight[0] = patch->baselight.f[0];
+            patch->totallight[1] = patch->baselight.f[4];
+            patch->totallight[2] = patch->baselight.f[8];
         }
     } else {
         dface_t *f;
@@ -494,14 +504,14 @@ void MakePatchForFace(int32_t fn, winding_t *w) {
 
         // non-bmodel patches can emit light
         if (fn < dmodels[0].numfaces) {
-            BaseLightForFaceI(f, patch->baselight);
-
             ColorNormalize(patch->reflectivity, color);
 
-            for (i = 0; i < 3; i++)
-                patch->baselight[i] *= color[i];
+            patch->baselight = SH1_ColorScale(BaseLightForFaceI(f), color);
 
-            VectorCopy(patch->baselight, patch->totallight);
+            // VectorCopy(patch->baselight, patch->totallight);
+            patch->totallight[0] = patch->baselight.f[0];
+            patch->totallight[1] = patch->baselight.f[4];
+            patch->totallight[2] = patch->baselight.f[8];
         }
     }
     num_patches++;
@@ -579,7 +589,7 @@ SUBDIVIDE
 */
 
 void FinishSplit(patch_t *patch, patch_t *newp) {
-    VectorCopy(patch->baselight, newp->baselight);
+    newp->baselight = patch->baselight;
     VectorCopy(patch->totallight, newp->totallight);
     VectorCopy(patch->reflectivity, newp->reflectivity);
     newp->plane = patch->plane;
