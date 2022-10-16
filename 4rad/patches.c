@@ -332,7 +332,7 @@ struct SH1 BaseLightForFaceX(dface_tx *f) {
 
     // non-standard use, get a more diffuse baselight from short direction vector
     vec3_t normal, color;
-    VectorScale((f->side ? backplanes[f->planenum].normal : dplanes[f->planenum].normal), 0.25, normal);
+    VectorScale((f->side ? backplanes[f->planenum].normal : dplanes[f->planenum].normal), -0.25, normal);
     VectorScale(texture_reflectivity[f->texinfo], tx->value, color);
 
     return SH1_FromDirectionalLight(normal, color);
@@ -455,9 +455,7 @@ void MakePatchForFace(int32_t fn, winding_t *w) {
             patch->baselight = SH1_ColorScale(BaseLightForFaceX(f), color);
 
             // VectorCopy(patch->baselight, patch->totallight);
-            patch->totallight[0] = patch->baselight.f[0];
-            patch->totallight[1] = patch->baselight.f[4];
-            patch->totallight[2] = patch->baselight.f[8];
+            patch->totallight = patch->baselight;
         }
     } else {
         dface_t *f;
@@ -509,9 +507,7 @@ void MakePatchForFace(int32_t fn, winding_t *w) {
             patch->baselight = SH1_ColorScale(BaseLightForFaceI(f), color);
 
             // VectorCopy(patch->baselight, patch->totallight);
-            patch->totallight[0] = patch->baselight.f[0];
-            patch->totallight[1] = patch->baselight.f[4];
-            patch->totallight[2] = patch->baselight.f[8];
+            patch->totallight = patch->baselight;
         }
     }
     num_patches++;
@@ -590,7 +586,7 @@ SUBDIVIDE
 
 void FinishSplit(patch_t *patch, patch_t *newp) {
     newp->baselight = patch->baselight;
-    VectorCopy(patch->totallight, newp->totallight);
+    newp->totallight = patch->totallight;
     VectorCopy(patch->reflectivity, newp->reflectivity);
     newp->plane = patch->plane;
     newp->sky   = patch->sky;

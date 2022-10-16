@@ -944,34 +944,24 @@ void AddPointToTriangulation(patch_t *patch, triangulation_t *trian) {
 LerpTriangle
 ===============
 */
-void LerpTriangle(triangulation_t *trian, triangle_t *t, vec3_t point, vec3_t color) {
-    patch_t *p1, *p2, *p3;
-    vec3_t base, d1, d2;
-    float x, y, x1, y1;
+struct SH1 LerpTriangle(triangulation_t *trian, triangle_t *t, vec3_t point) {
+    patch_t *p1 = trian->points[t->edges[0]->p0];
+    patch_t *p2 = trian->points[t->edges[1]->p0];
+    patch_t *p3 = trian->points[t->edges[2]->p0];
 
-    p1 = trian->points[t->edges[0]->p0];
-    p2 = trian->points[t->edges[1]->p0];
-    p3 = trian->points[t->edges[2]->p0];
+    float x1 = DotProduct(p3->origin, t->edges[0]->normal) - t->edges[0]->dist;
+    float y1 = DotProduct(p2->origin, t->edges[2]->normal) - t->edges[2]->dist;
 
-    VectorCopy(p1->totallight, base);
+    float c2 = (fabs(x1) >= ON_EPSILON) ? (DotProduct(point, t->edges[0]->normal) - t->edges[0]->dist) / x1 : 0;
+    float c3 = (fabs(y1) >= ON_EPSILON) ? (DotProduct(point, t->edges[2]->normal) - t->edges[2]->dist) / y1 : 0;
+    float c1 = 1.0f - (c2*c2 + c3*c3);
 
-    x1 = DotProduct(p3->origin, t->edges[0]->normal) - t->edges[0]->dist;
-    y1 = DotProduct(p2->origin, t->edges[2]->normal) - t->edges[2]->dist;
-
-    VectorCopy(base, color);
-
-    if (fabs(x1) >= ON_EPSILON) {
-        VectorSubtract(p3->totallight, base, d2);
-        x = DotProduct(point, t->edges[0]->normal) - t->edges[0]->dist;
-        x /= x1;
-        VectorMA(color, x, d2, color);
-    }
-    if (fabs(y1) >= ON_EPSILON) {
-        VectorSubtract(p2->totallight, base, d1);
-        y = DotProduct(point, t->edges[2]->normal) - t->edges[2]->dist;
-        y /= y1;
-        VectorMA(color, y, d1, color);
-    }
+    return SH1_Add(
+        SH1_Add(
+            SH1_Scale(p1->totallight, c1),
+            SH1_Scale(p2->totallight, c2)
+        ), SH1_Scale(p3->totallight, c3)
+    );
 }
 
 qboolean PointInTriangle(vec3_t point, triangle_t *t) {
@@ -994,7 +984,7 @@ qboolean PointInTriangle(vec3_t point, triangle_t *t) {
 SampleTriangulation
 ===============
 */
-void SampleTriangulation(vec3_t point, triangulation_t *trian, triangle_t **last_valid, vec3_t color) {
+struct SH1 SampleTriangulation(vec3_t point, triangulation_t *trian, triangle_t **last_valid) {
     triangle_t *t;
     triedge_t *e;
     vec_t d, best;
@@ -1003,20 +993,17 @@ void SampleTriangulation(vec3_t point, triangulation_t *trian, triangle_t **last
     int32_t i, j;
 
     if (trian->numpoints == 0) {
-        VectorClear(color);
-        return;
+        return SH1_Clear();
     }
 
     if (trian->numpoints == 1) {
-        VectorCopy(trian->points[0]->totallight, color);
-        return;
+        return trian->points[0]->totallight;
     }
 
     // try the last one
     if (*last_valid) {
         if (PointInTriangle(point, *last_valid)) {
-            LerpTriangle(trian, *last_valid, point, color);
-            return;
+            return LerpTriangle(trian, *last_valid, point);
         }
     }
 
@@ -1029,8 +1016,7 @@ void SampleTriangulation(vec3_t point, triangulation_t *trian, triangle_t **last
             continue;
 
         *last_valid = t;
-        LerpTriangle(trian, t, point, color);
-        return;
+        return LerpTriangle(trian, t, point);
     }
 
     // search for exterior edge
@@ -1053,9 +1039,7 @@ void SampleTriangulation(vec3_t point, triangulation_t *trian, triangle_t **last
             continue;
         if (d > 1)
             continue;
-        for (i = 0; i < 3; i++)
-            color[i] = p0->totallight[i] + d * (p1->totallight[i] - p0->totallight[i]);
-        return;
+        return SH1_Add(SH1_Scale(p0->totallight, 1.0f - d), SH1_Scale(p1->totallight, d));
     }
 
     // search for nearest point
@@ -1074,7 +1058,7 @@ void SampleTriangulation(vec3_t point, triangulation_t *trian, triangle_t **last
     if (!p1)
         Error("SampleTriangulation: no points");
 
-    VectorCopy(p1->totallight, color);
+    return p1->totallight;
 }
 
 /*
@@ -1554,10 +1538,10 @@ void CreateDirectLights(void) {
 
         _color = ValueForKey(e, "_color");
         if (_color && _color[0]) {
-            sscanf(_color, "%f %f %f", &dl->color[0], &dl->color[1], &dl->color[2]);
-            ColorNormalize(dl->color, dl->color);
+            sscanf(_color, "%f %f %f", &dl->color.f[0], &dl->color.f[4], &dl->color.f[8]);
+            dl->color = SH1_Normalize(dl->color, NULL);
         } else
-            dl->color[0] = dl->color[1] = dl->color[2] = 1.0;
+            dl->color.f[0] = dl->color.f[8] = dl->color.f[8] = 1.0;
 
         dl->intensity = intensity * entity_scale;
         dl->type      = emit_point;
@@ -1604,7 +1588,7 @@ void CreateDirectLights(void) {
     //
 
     for (i = 0, p = patches; i < num_patches; i++, p++) {
-        if ((!sun || !p->sky) && p->totallight[0] < DIRECT_LIGHT && p->totallight[1] < DIRECT_LIGHT && p->totallight[2] < DIRECT_LIGHT)
+        if ((!sun || !p->sky) && p->totallight.f[0] < DIRECT_LIGHT && p->totallight.f[4] < DIRECT_LIGHT && p->totallight.f[8] < DIRECT_LIGHT)
             continue;
 
         numdlights++;
@@ -1629,18 +1613,18 @@ void CreateDirectLights(void) {
             dl->plane     = p->plane;
             dl->type      = emit_sky;
             // qb: for sky radiosity, was dl->intensity = 1.0f;
-            dl->intensity = ColorNormalize(p->totallight, dl->color);
+            dl->color = SH1_Normalize(p->totallight, &dl->intensity);
             dl->intensity *= p->area * direct_scale;
             VectorCopy(p->plane->normal, dl->sky.normal);
         } else {
             dl->type      = emit_surface;
-            dl->intensity = ColorNormalize(p->totallight, dl->color);
+            dl->color = SH1_Normalize(p->totallight, &dl->intensity);
             dl->intensity *= p->area * direct_scale;
             VectorCopy(p->plane->normal, dl->surface.normal);
             dl->surface.winding = p->winding;
         }
 
-        VectorClear(p->totallight); // all sent now
+        p->totallight = SH1_Clear();
     }
 
     printf("%i direct lights\n", numdlights);
@@ -1743,8 +1727,8 @@ static struct SH1 LightContributionToPoint(directlight_t *l, vec3_t pos, int32_t
       source_dot = -DotProduct(direction, l->surface.normal);
       if(source_dot <= 0)
         continue;
-      scale = (l->intensity / (distance * distance)) * source_dot;
-      VectorScale(l->color, scale, color);
+      scale = l->intensity / (distance * distance);
+      SH1_Sample(SH1_Scale(l->color, scale), direction, color);
       result = SH1_Add(result, SH1_FromDirectionalLight(direction, color));
       hits++;
     }
@@ -1765,7 +1749,7 @@ static struct SH1 LightContributionToPoint(directlight_t *l, vec3_t pos, int32_t
           ;
     if(scale < 0)
       return result;
-    VectorScale(l->color, scale, color);
+    SH1_Sample(SH1_Scale(l->color, scale), direction, color);
     result = SH1_FromDirectionalLight(direction, color);
     break;
   }
@@ -1775,7 +1759,7 @@ static struct SH1 LightContributionToPoint(directlight_t *l, vec3_t pos, int32_t
     if(source_dot <= l->spotlight.dot)
       return result;
     scale = (l->intensity - l->wait * distance) * powf(source_dot, 25) * 15;
-    VectorScale(l->color, scale, color);
+    SH1_Sample(SH1_Scale(l->color, scale), direction, color);
     result = SH1_FromDirectionalLight(direction, color);
     break;
   }
@@ -2344,14 +2328,13 @@ void FinalLightFace(int32_t facenum) {
             f->styles[st] = fl->stylenums[st];
 
             for (j = 0; j < fl->numsamples; j++) {
-                SH1_Sample(fl->samples[st][j], f->side ? backplanes[f->planenum].normal : dplanes[f->planenum].normal, lb);
+                struct SH1 color = fl->samples[st][j];
 
                 if (numbounce > 0 && st == 0) {
-                    vec3_t add;
-
-                    SampleTriangulation(fl->origins + j * 3, trian, &last_valid, add);
-                    VectorAdd(lb, add, lb);
+                    color = SH1_Add(color, SampleTriangulation(fl->origins + j * 3, trian, &last_valid));
                 }
+
+                SH1_Sample(color, f->side ? backplanes[f->planenum].normal : dplanes[f->planenum].normal, lb);
 
                 /*
                  * to allow experimenting, ambient and lightscale are not limited
@@ -2472,15 +2455,16 @@ void FinalLightFace(int32_t facenum) {
             f->styles[st] = fl->stylenums[st];
 
             for (j = 0; j < fl->numsamples; j++) {
-                // VectorClear(lb);
-                SH1_Sample(fl->samples[st][j], f->side ? backplanes[f->planenum].normal : dplanes[f->planenum].normal, lb);
+                struct SH1 color = fl->samples[st][j];
 
                 if (numbounce > 0 && st == 0) {
-                    vec3_t add;
-
-                    SampleTriangulation(fl->origins + j * 3, trian, &last_valid, add);
-                    VectorAdd(lb, add, lb);
+                    color = SH1_Add(color, SampleTriangulation(fl->origins + j * 3, trian, &last_valid));
                 }
+
+                // SH1_Sample(color, f->side ? backplanes[f->planenum].normal : dplanes[f->planenum].normal, lb);
+                lb[0] = color.f[0];
+                lb[1] = color.f[4];
+                lb[2] = color.f[8];
 
                 /*
                  * to allow experimenting, ambient and lightscale are not limited

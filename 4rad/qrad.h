@@ -114,6 +114,13 @@ static inline struct SH1 SH1_Reflect(const struct SH1 sh1, const float normal[3]
                       .f[11] = sh1.f[11] - bd*normal[2]};
 }
 
+static inline struct SH1 SH1_Normalize(const struct SH1 sh1, float * out_intensity) {
+  float intensity = MAX(sh1.f[0], MAX(sh1.f[4], sh1.f[8]));
+  if(out_intensity)
+    *out_intensity = intensity;
+  return SH1_Scale(sh1, 1.0f / intensity);
+}
+
 static inline void SH1_Sample(const struct SH1 sh1, const float direction[3], float output_color[3]) {
   // https://grahamhazel.com/blog/
   for(int component = 0; component < 3; component++) {
@@ -124,7 +131,7 @@ static inline void SH1_Sample(const struct SH1 sh1, const float direction[3], fl
     r1[2] = sh1.f[component * 4 + 3];
     float r1_length_sq = r1[0] * r1[0] + r1[1] * r1[1] + r1[2] * r1[2];
     if(r1_length_sq <= __FLT_EPSILON__ || r0 <= __FLT_EPSILON__) {
-      output_color[component] = 0;
+      output_color[component] = r0;
       continue;
     }
     float r1_length = sqrt(r1_length_sq);
@@ -173,7 +180,7 @@ typedef struct directlight_s {
     float adjangle;
     int32_t falloff;
     vec3_t origin;
-    vec3_t color;
+    struct SH1 color;
     //vec3_t normal; // for surfaces and spotlights
     //float stopdot; // for spotlights
     dplane_t *plane;
@@ -215,7 +222,7 @@ typedef struct patch_s {
 
     qboolean sky;
 
-    vec3_t totallight; // accumulated by radiosity
+    struct SH1 totallight; // accumulated by radiosity
                        // does NOT include light
                        // accounted for by direct lighting
     float area;

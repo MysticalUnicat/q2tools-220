@@ -625,9 +625,9 @@ void WriteWorld(char *name) {
                     w->p[i][0],
                     w->p[i][1],
                     w->p[i][2],
-                    patch->totallight[0],
-                    patch->totallight[1],
-                    patch->totallight[2]);
+                    patch->totallight.f[0],
+                    patch->totallight.f[4],
+                    patch->totallight.f[8]);
         }
         fprintf(out, "\n");
     }
@@ -661,9 +661,7 @@ float CollectLight(void) {
 
         struct SH1 illum = SH1_Reflect(illumination[i], normal);
 
-        for (j = 0; j < 3; j++) {
-            patch->totallight[j] += illum.f[j * 4] / patch->area;
-        }
+        patch->totallight = SH1_Add(patch->totallight, illum);
 
         radiosity[i] = SH1_ColorScale(illum, patch->reflectivity);
 
@@ -781,7 +779,7 @@ void CheckPatches(void) {
 
     for (i = 0; i < num_patches; i++) {
         patch = &patches[i];
-        if (patch->totallight[0] < 0 || patch->totallight[1] < 0 || patch->totallight[2] < 0)
+        if (patch->totallight.f[0] < 0 || patch->totallight.f[4] < 0 || patch->totallight.f[8] < 0)
             Error("negative patch totallight\n");
     }
 }
