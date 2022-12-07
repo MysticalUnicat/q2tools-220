@@ -954,7 +954,7 @@ struct SH1 LerpTriangle(triangulation_t *trian, triangle_t *t, vec3_t point) {
 
     float c2 = (fabs(x1) >= ON_EPSILON) ? (DotProduct(point, t->edges[0]->normal) - t->edges[0]->dist) / x1 : 0;
     float c3 = (fabs(y1) >= ON_EPSILON) ? (DotProduct(point, t->edges[2]->normal) - t->edges[2]->dist) / y1 : 0;
-    float c1 = 1.0f - (c2*c2 + c3*c3);
+    float c1 = 1.0f - (c2 + c3);
 
     return SH1_Add(
         SH1_Add(
@@ -1541,7 +1541,7 @@ void CreateDirectLights(void) {
             sscanf(_color, "%f %f %f", &dl->color.f[0], &dl->color.f[4], &dl->color.f[8]);
             dl->color = SH1_Normalize(dl->color, NULL);
         } else
-            dl->color.f[0] = dl->color.f[8] = dl->color.f[8] = 1.0;
+            dl->color.f[0] = dl->color.f[4] = dl->color.f[8] = 1.0;
 
         dl->intensity = intensity * entity_scale;
         dl->type      = emit_point;
@@ -2197,7 +2197,9 @@ void BuildFacelights(int32_t facenum) {
     // average up the direct light on each patch for radiosity
     for (patch = face_patches[facenum]; patch; patch = patch->next) {
         if (patch->samples) {
-            patch->samplelight = SH1_Scale(patch->samplelight, 1.0f / patch->samples);
+            vec3_t normal;
+            VectorCopy(patch->plane->normal, normal);
+            patch->samplelight = SH1_Reflect(SH1_Scale(patch->samplelight, 1.0f / patch->samples), normal);
         }
     }
 
@@ -2242,7 +2244,7 @@ void FinalLightFace(int32_t facenum) {
     facelight_t *fl;
     float max;
     float newmax;
-    byte *dest;
+    byte *dest_rgb0, *dest_r1, *dest_g1, *dest_b1;
     triangle_t *last_valid;
     int32_t pfacenum;
     vec3_t facemins, facemaxs;
@@ -2251,7 +2253,7 @@ void FinalLightFace(int32_t facenum) {
 
     ThreadLock();
     i = lightdatasize;
-    lightdatasize += fl->numstyles * (fl->numsamples * 3);
+    lightdatasize += fl->numstyles * (fl->numsamples * 3 * 4);
 
     if (lightdatasize > maxdata) {
         printf("face %d of %d\n", facenum, numfaces);
@@ -2260,133 +2262,133 @@ void FinalLightFace(int32_t facenum) {
     ThreadUnlock();
 
     if (use_qbsp) {
-        dface_tx *f;
-        f = &dfacesX[facenum];
+        // dface_tx *f;
+        // f = &dfacesX[facenum];
 
-        if (texinfo[f->texinfo].flags & (SURF_WARP | SURF_SKY))
-            return; // non-lit texture
+        // if (texinfo[f->texinfo].flags & (SURF_WARP | SURF_SKY))
+        //     return; // non-lit texture
 
-        f->lightofs  = i;
-        f->styles[0] = 0;
-        f->styles[1] = f->styles[2] = f->styles[3] = 0xff;
+        // f->lightofs  = i;
+        // f->styles[0] = 0;
+        // f->styles[1] = f->styles[2] = f->styles[3] = 0xff;
 
-        //
-        // set up the triangulation
-        //
-        if (numbounce > 0) {
-            ClearBounds(facemins, facemaxs);
-            for (i = 0; i < f->numedges; i++) {
-                int32_t ednum;
+        // //
+        // // set up the triangulation
+        // //
+        // if (numbounce > 0) {
+        //     ClearBounds(facemins, facemaxs);
+        //     for (i = 0; i < f->numedges; i++) {
+        //         int32_t ednum;
 
-                ednum = dsurfedges[f->firstedge + i];
-                if (ednum >= 0)
-                    AddPointToBounds(dvertexes[dedgesX[ednum].v[0]].point,
-                                     facemins, facemaxs);
-                else
-                    AddPointToBounds(dvertexes[dedgesX[-ednum].v[1]].point,
-                                     facemins, facemaxs);
-            }
+        //         ednum = dsurfedges[f->firstedge + i];
+        //         if (ednum >= 0)
+        //             AddPointToBounds(dvertexes[dedgesX[ednum].v[0]].point,
+        //                              facemins, facemaxs);
+        //         else
+        //             AddPointToBounds(dvertexes[dedgesX[-ednum].v[1]].point,
+        //                              facemins, facemaxs);
+        //     }
 
-            trian = AllocTriangulation(&dplanes[f->planenum]);
+        //     trian = AllocTriangulation(&dplanes[f->planenum]);
 
-            // for all faces on the plane, add the nearby patches
-            // to the triangulation
-            for (pfacenum = planelinks[f->side][f->planenum]; pfacenum; pfacenum = facelinks[pfacenum]) {
-                for (patch = face_patches[pfacenum]; patch; patch = patch->next) {
-                    for (i = 0; i < 3; i++) {
-                        if (facemins[i] - patch->origin[i] > subdiv * 2)
-                            break;
-                        if (patch->origin[i] - facemaxs[i] > subdiv * 2)
-                            break;
-                    }
-                    if (i != 3)
-                        continue; // not needed for this face
-                    AddPointToTriangulation(patch, trian);
-                }
-            }
-            for (i = 0; i < trian->numpoints; i++)
-                memset(trian->edgematrix[i], 0, trian->numpoints * sizeof(trian->edgematrix[0][0]));
-            TriangulatePoints(trian);
-        }
+        //     // for all faces on the plane, add the nearby patches
+        //     // to the triangulation
+        //     for (pfacenum = planelinks[f->side][f->planenum]; pfacenum; pfacenum = facelinks[pfacenum]) {
+        //         for (patch = face_patches[pfacenum]; patch; patch = patch->next) {
+        //             for (i = 0; i < 3; i++) {
+        //                 if (facemins[i] - patch->origin[i] > subdiv * 2)
+        //                     break;
+        //                 if (patch->origin[i] - facemaxs[i] > subdiv * 2)
+        //                     break;
+        //             }
+        //             if (i != 3)
+        //                 continue; // not needed for this face
+        //             AddPointToTriangulation(patch, trian);
+        //         }
+        //     }
+        //     for (i = 0; i < trian->numpoints; i++)
+        //         memset(trian->edgematrix[i], 0, trian->numpoints * sizeof(trian->edgematrix[0][0]));
+        //     TriangulatePoints(trian);
+        // }
 
-        //
-        // sample the triangulation
-        //
+        // //
+        // // sample the triangulation
+        // //
 
-        dest = &dlightdata_ptr[f->lightofs];
+        // dest = &dlightdata_ptr[f->lightofs];
 
-        if (fl->numstyles > MAXLIGHTMAPS) {
-            fl->numstyles = MAXLIGHTMAPS;
-            //	printf ("face with too many lightstyles: (%f %f %f)\n",
-            //		face_patches[facenum]->origin[0],
-            //		face_patches[facenum]->origin[1],
-            //		face_patches[facenum]->origin[2]
-            //		);
-        }
-        for (st = 0; st < fl->numstyles; st++) {
-            last_valid    = NULL;
-            f->styles[st] = fl->stylenums[st];
+        // if (fl->numstyles > MAXLIGHTMAPS) {
+        //     fl->numstyles = MAXLIGHTMAPS;
+        //     //	printf ("face with too many lightstyles: (%f %f %f)\n",
+        //     //		face_patches[facenum]->origin[0],
+        //     //		face_patches[facenum]->origin[1],
+        //     //		face_patches[facenum]->origin[2]
+        //     //		);
+        // }
+        // for (st = 0; st < fl->numstyles; st++) {
+        //     last_valid    = NULL;
+        //     f->styles[st] = fl->stylenums[st];
 
-            for (j = 0; j < fl->numsamples; j++) {
-                struct SH1 color = fl->samples[st][j];
+        //     for (j = 0; j < fl->numsamples; j++) {
+        //         struct SH1 color = fl->samples[st][j];
 
-                if (numbounce > 0 && st == 0) {
-                    color = SH1_Add(color, SampleTriangulation(fl->origins + j * 3, trian, &last_valid));
-                }
+        //         if (numbounce > 0 && st == 0) {
+        //             color = SH1_Add(color, SampleTriangulation(fl->origins + j * 3, trian, &last_valid));
+        //         }
 
-                SH1_Sample(color, f->side ? backplanes[f->planenum].normal : dplanes[f->planenum].normal, lb);
+        //         SH1_Sample(color, f->side ? backplanes[f->planenum].normal : dplanes[f->planenum].normal, lb);
 
-                /*
-                 * to allow experimenting, ambient and lightscale are not limited
-                 *  to reasonable ranges.
-                 */
-                if (ambient >= -255.0f && ambient <= 255.0f) {
-                    // add fixed white ambient.
-                    lb[0] += ambient;
-                    lb[1] += ambient;
-                    lb[2] += ambient;
-                }
-                if (lightscale > 0.0f) {
-                    // apply lightscale, scale down or up
-                    lb[0] *= lightscale;
-                    lb[1] *= lightscale;
-                    lb[2] *= lightscale;
-                }
-                // negative values not allowed
-                lb[0] = (lb[0] < 0.0f) ? 0.0f : lb[0];
-                lb[1] = (lb[1] < 0.0f) ? 0.0f : lb[1];
-                lb[2] = (lb[2] < 0.0f) ? 0.0f : lb[2];
+        //         /*
+        //          * to allow experimenting, ambient and lightscale are not limited
+        //          *  to reasonable ranges.
+        //          */
+        //         if (ambient >= -255.0f && ambient <= 255.0f) {
+        //             // add fixed white ambient.
+        //             lb[0] += ambient;
+        //             lb[1] += ambient;
+        //             lb[2] += ambient;
+        //         }
+        //         if (lightscale > 0.0f) {
+        //             // apply lightscale, scale down or up
+        //             lb[0] *= lightscale;
+        //             lb[1] *= lightscale;
+        //             lb[2] *= lightscale;
+        //         }
+        //         // negative values not allowed
+        //         lb[0] = (lb[0] < 0.0f) ? 0.0f : lb[0];
+        //         lb[1] = (lb[1] < 0.0f) ? 0.0f : lb[1];
+        //         lb[2] = (lb[2] < 0.0f) ? 0.0f : lb[2];
 
-                /*			qprintf("{%f %f %f}:",lb[0],lb[1],lb[2]);*/
+        //         /*			qprintf("{%f %f %f}:",lb[0],lb[1],lb[2]);*/
 
-                // determine max of R,G,B
-                max   = lb[0] > lb[1] ? lb[0] : lb[1];
-                max   = max > lb[2] ? max : lb[2];
+        //         // determine max of R,G,B
+        //         max   = lb[0] > lb[1] ? lb[0] : lb[1];
+        //         max   = max > lb[2] ? max : lb[2];
 
-                if (max < 1.0f)
-                    max = 1.0f;
+        //         if (max < 1.0f)
+        //             max = 1.0f;
 
-                // note that maxlight based scaling is per-sample based on
-                //  highest value of R, G, and B
-                // adjust for -maxlight option
-                newmax = max;
-                if (max > maxlight) {
-                    newmax = maxlight;
-                    newmax /= max; // scaling factor 0.0..1.0
-                    // scale into 0.0..maxlight range
-                    lb[0] *= newmax;
-                    lb[1] *= newmax;
-                    lb[2] *= newmax;
-                }
+        //         // note that maxlight based scaling is per-sample based on
+        //         //  highest value of R, G, and B
+        //         // adjust for -maxlight option
+        //         newmax = max;
+        //         if (max > maxlight) {
+        //             newmax = maxlight;
+        //             newmax /= max; // scaling factor 0.0..1.0
+        //             // scale into 0.0..maxlight range
+        //             lb[0] *= newmax;
+        //             lb[1] *= newmax;
+        //             lb[2] *= newmax;
+        //         }
 
-                // and output to 8:8:8 RGB
-                *dest++ = (byte)(lb[0] + 0.5);
-                *dest++ = (byte)(lb[1] + 0.5);
-                *dest++ = (byte)(lb[2] + 0.5);
-            }
-        }
-    } else // ibsp
-    {
+        //         // and output to 8:8:8 RGB
+        //         *dest++ = (byte)(lb[0] + 0.5);
+        //         *dest++ = (byte)(lb[1] + 0.5);
+        //         *dest++ = (byte)(lb[2] + 0.5);
+        //     }
+        // }
+    } else {
+         // ibsp
         dface_t *f;
         f = &dfaces[facenum];
 
@@ -2440,7 +2442,10 @@ void FinalLightFace(int32_t facenum) {
         // sample the triangulation
         //
 
-        dest = &dlightdata_ptr[f->lightofs];
+        dest_rgb0 = &dlightdata_ptr[f->lightofs + (fl->numsamples * 3 * 0)];
+        dest_r1 = &dlightdata_ptr[f->lightofs + (fl->numsamples * 3 * 1)];
+        dest_g1 = &dlightdata_ptr[f->lightofs + (fl->numsamples * 3 * 2)];
+        dest_b1 = &dlightdata_ptr[f->lightofs + (fl->numsamples * 3 * 3)];
 
         if (fl->numstyles > MAXLIGHTMAPS) {
             fl->numstyles = MAXLIGHTMAPS;
@@ -2461,58 +2466,51 @@ void FinalLightFace(int32_t facenum) {
                     color = SH1_Add(color, SampleTriangulation(fl->origins + j * 3, trian, &last_valid));
                 }
 
-                // SH1_Sample(color, f->side ? backplanes[f->planenum].normal : dplanes[f->planenum].normal, lb);
-                lb[0] = color.f[0];
-                lb[1] = color.f[4];
-                lb[2] = color.f[8];
-
                 /*
                  * to allow experimenting, ambient and lightscale are not limited
                  *  to reasonable ranges.
                  */
                 if (ambient >= -255.0f && ambient <= 255.0f) {
                     // add fixed white ambient.
-                    lb[0] += ambient;
-                    lb[1] += ambient;
-                    lb[2] += ambient;
+                    color.f[0] += ambient;
+                    color.f[4] += ambient;
+                    color.f[8] += ambient;
                 }
+
                 if (lightscale > 0.0f) {
                     // apply lightscale, scale down or up
-                    lb[0] *= lightscale;
-                    lb[1] *= lightscale;
-                    lb[2] *= lightscale;
+                    color = SH1_Scale(color, lightscale);
                 }
-                // negative values not allowed
-                lb[0] = (lb[0] < 0.0f) ? 0.0f : lb[0];
-                lb[1] = (lb[1] < 0.0f) ? 0.0f : lb[1];
-                lb[2] = (lb[2] < 0.0f) ? 0.0f : lb[2];
 
-                /*			qprintf("{%f %f %f}:",lb[0],lb[1],lb[2]);*/
+                float color_max;
+                color = SH1_NormalizeMaximum(color, maxlight - 0.5f, &color_max);
 
-                // determine max of R,G,B
-                max   = lb[0] > lb[1] ? lb[0] : lb[1];
-                max   = max > lb[2] ? max : lb[2];
+                for(int component = 0; component < 3; component++) {
+                    if(color.f[component * 4 + 0] > maxlight)
+                        assert(0);
 
-                if (max < 1.0f)
-                    max = 1.0f;
+                    for(int basis = 0; basis < 3; basis++) {
+                        color.f[component * 4 + basis + 1] *= 0.5f;
+                        color.f[component * 4 + basis + 1] += 127.0f;
 
-                // note that maxlight based scaling is per-sample based on
-                //  highest value of R, G, and B
-                // adjust for -maxlight option
-                newmax = max;
-                if (max > maxlight) {
-                    newmax = maxlight;
-                    newmax /= max; // scaling factor 0.0..1.0
-                    // scale into 0.0..maxlight range
-                    lb[0] *= newmax;
-                    lb[1] *= newmax;
-                    lb[2] *= newmax;
+                        if(color.f[component * 4 + basis + 1] > 256)
+                            assert(0);
+                    }
                 }
 
                 // and output to 8:8:8 RGB
-                *dest++ = (byte)(lb[0] + 0.5);
-                *dest++ = (byte)(lb[1] + 0.5);
-                *dest++ = (byte)(lb[2] + 0.5);
+                *dest_rgb0++ = (byte)(color.f[0] + 0.5f);
+                *dest_r1++ = (byte)(color.f[1] + 0.5f);
+                *dest_r1++ = (byte)(color.f[2] + 0.5f);
+                *dest_r1++ = (byte)(color.f[3] + 0.5f);
+                *dest_rgb0++ = (byte)(color.f[4] + 0.5f);
+                *dest_g1++ = (byte)(color.f[5] + 0.5f);
+                *dest_g1++ = (byte)(color.f[6] + 0.5f);
+                *dest_g1++ = (byte)(color.f[7] + 0.5f);
+                *dest_rgb0++ = (byte)(color.f[8] + 0.5f);
+                *dest_b1++ = (byte)(color.f[9] + 0.5f);
+                *dest_b1++ = (byte)(color.f[10] + 0.5f);
+                *dest_b1++ = (byte)(color.f[11] + 0.5f);
             }
         }
     }

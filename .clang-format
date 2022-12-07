@@ -1,4 +1,12 @@
 ﻿---
-DisableFormat: true
+BasedOnStyle: LLVM
+AlignConsecutiveAssignments: 'false'
+AlignConsecutiveDeclarations: 'false'
+ColumnLimit: '120'
+SpaceBeforeParens: Never
+SpaceInEmptyParentheses: 'false'
+SpacesInAngles: 'false'
+TabWidth: '2'
+UseTab: Never
 SortIncludes: false
 ...
